@@ -46,28 +46,22 @@ def parse_handwriting(recipeName: str) -> Union[str, None]:
     if not isinstance(recipeName, str):
         return None
 
-    original = recipeName
+    # Replace hyphens/underscores with spaces
+    s = recipeName.replace('-', ' ').replace('_', ' ')
 
-    # Replace all hyphens and underscores with whitespace
-    s = original.replace('-', ' ').replace('_', ' ')
-
-    # Keep only letters and whitespaces (and remove everything else)
+    # Remove all non-letters and non-whitespace
     s = re.sub(r'[^A-Za-z\s]', '', s)
 
-    # Squash multiple whitespaces, trim leading/trailing
+    # Collapse whitespace and trim
     s = re.sub(r'\s+', ' ', s).strip()
 
-    # If empty, return None
+    # Must be non-empty
     if len(s) == 0:
         return None
 
-    # Capitalise first letter of each word, rest lowercase
+    # Title case each word (first letter uppercase, rest lowercase)
     words = s.split(' ')
-    s = ' '.join(w[:1].upper() + w[1:].lower() for w in words if w)
-
-    # If input already satisfies all conditions, return the original input
-    if s == original:
-        return original
+    s = ' '.join(w[0].upper() + w[1:].lower() for w in words)
 
     return s
 
@@ -169,59 +163,39 @@ def summary():
 
 
 def _summarise_recipe(recipe_name: str) -> Tuple[int, Dict[str, int]]:
-	"""
-	Returns:
-	- total cook time (int)
-	- aggregated base ingredients {ingredient_name: total_quantity}
+    visited = set()
 
-	Raises Error if:
-	- recipe/ingredient referenced doesn't exist in cookbook
-	- a requiredItem name resolves to an invalid name
-	- cycle detected (recipe depends on itself indirectly)
-	"""
-	visited = set() # cycle detection for recipes
+    def dfs(name: str, multiplier: int) -> Tuple[int, Dict[str, int]]:
+        entry = cookbook.get(name)
+        if entry is None:
+            raise ValueError("Missing entry")
 
-	def dfs(name: str, multiplier: int) -> Tuple[int, Dict[str, int]]:
-		entry = cookbook.get(name)
-		if entry is None:
-			raise ValueError("Missing entry")
+        if isinstance(entry, Ingredient):
+            return entry.cook_time * multiplier, {entry.name: multiplier}
 
-		# Base ingredient
-		if isinstance(entry, Ingredient):
-			if entry.cook_time < 0:
-				raise ValueError("Invalid cook_time")
-			return entry.cook_time * multiplier, {entry.name: multiplier}
+        if not isinstance(entry, Recipe):
+            raise ValueError("Unknown entry type")
 
-		# Recipe
-		if not isinstance(entry, Recipe):
-			raise ValueError("Unknown entry type")
+        if name in visited:
+            raise ValueError("Cycle detected")
+        visited.add(name)
 
-		if name in visited:
-			raise ValueError("Cycle detected")
-		visited.add(name)
+        total_time = 0
+        agg: Dict[str, int] = {}
 
-		total_time = 0
-		agg: Dict[str, int] = {}
+        for req in entry.required_items:
+            req_name = req.name
+            qty = req.quantity
 
-		# Behaviour for empty required_items undefined
-		for req in entry.required_items:
-			parsed_req_name = parse_handwriting(req.name)
-			if parsed_req_name is None:
-				raise ValueError("Invalid required item name")
+            t, sub = dfs(req_name, multiplier * qty)
+            total_time += t
+            for ing_name, ing_qty in sub.items():
+                agg[ing_name] = agg.get(ing_name, 0) + ing_qty
 
-			qty = req.quantity
-			if not isinstance(qty, int) or qty <= 0:
-				raise ValueError("Invalid quantity")
+        visited.remove(name)
+        return total_time, agg
 
-			t, sub = dfs(parsed_req_name, multiplier * qty)
-			total_time += t
-			for ing_name, ing_qty in sub.items():
-				agg[ing_name] = agg.get(ing_name, 0) + ing_qty
-
-		visited.remove(name)
-		return total_time, agg
-
-	return dfs(recipe_name, 1)
+    return dfs(recipe_name, 1)
 
 # =============================================================================
 # ==== DO NOT TOUCH ===========================================================
